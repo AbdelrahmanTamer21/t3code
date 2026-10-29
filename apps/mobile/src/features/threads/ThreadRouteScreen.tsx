@@ -20,6 +20,7 @@ import {
   AuthTerminalReadScope,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
+  MessageId,
   ThreadId,
   type ProjectScript,
 } from "@t3tools/contracts";
@@ -54,6 +55,11 @@ import {
 } from "../../state/use-remote-environment-registry";
 import { useKnownTerminalSessions } from "../../state/use-terminal-session";
 import { uuidv4 } from "../../lib/uuid";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+  type AtomCommandResult,
+} from "@t3tools/client-runtime/state/runtime";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
@@ -386,6 +392,7 @@ function ThreadRouteContent(
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
   const resumeThreadQueue = useAtomCommand(threadEnvironment.resumeThreadQueue, "resume queue");
+  const continueThreadRun = useAtomCommand(threadEnvironment.startTurn, "continue thread");
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     label: "load earlier thread history",
     reportFailure: false,
@@ -689,10 +696,45 @@ function ThreadRouteContent(
 
   const handleResumeQueue = async () => {
     if (!selectedThread) return;
-    await resumeThreadQueue({
-      environmentId: selectedThread.environmentId,
-      input: { threadId: selectedThread.id },
-    });
+    const failed = (result: AtomCommandResult<unknown, unknown>) => {
+      if (result._tag !== "Failure") return false;
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        Dialog.alert(
+          "Could not resume thread",
+          error instanceof Error ? error.message : "Try again.",
+        );
+      }
+      return true;
+    };
+    // The server holds the queue behind a stopped or usage-limited run until that run is continued.
+    if (composer.resumableRunId !== null) {
+      const continued = await continueThreadRun({
+        environmentId: selectedThread.environmentId,
+        input: {
+          creationSource: "mobile",
+          threadId: selectedThread.id,
+          manualContinuationOfRunId: composer.resumableRunId,
+          ...(composer.modelSelection ? { modelSelection: composer.modelSelection } : {}),
+          message: {
+            messageId: MessageId.make(uuidv4()),
+            role: "user",
+            text: "Continue where you left off.",
+            attachments: [],
+          },
+          runtimeMode: composer.runtimeMode ?? selectedThread.runtimeMode,
+          interactionMode: composer.interactionMode ?? selectedThread.interactionMode,
+          dispatchMode: "start",
+        },
+      });
+      if (failed(continued)) return;
+    }
+    failed(
+      await resumeThreadQueue({
+        environmentId: selectedThread.environmentId,
+        input: { threadId: selectedThread.id },
+      }),
+    );
   };
 
   const handleOpenTerminal = (nextTerminalId?: string | null) => {
