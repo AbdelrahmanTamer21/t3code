@@ -727,7 +727,7 @@ function ThreadRouteContent(
           dispatchMode: "start",
         },
       });
-      if (failed(continued)) return;
+      if (failed(continued) || !composer.queueHeld) return;
     }
     failed(
       await resumeThreadQueue({
@@ -1119,7 +1119,9 @@ function ThreadRouteContent(
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
           onStopThread={awaitingBootstrapTurn ? handleCancelWorktreeSetup : handleStopThread}
-          onResumeQueue={composer.queueHeld ? handleResumeQueue : null}
+          onResumeQueue={
+            composer.queueHeld || composer.resumableRunId !== null ? handleResumeQueue : null
+          }
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           canSwitchThreadProvider={composer.canSwitchThreadProvider}
