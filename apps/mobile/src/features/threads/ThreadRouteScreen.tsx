@@ -399,6 +399,14 @@ function ThreadRouteContent(
     label: "continue thread",
     reportFailure: false,
   });
+  const setThreadRuntimeMode = useAtomCommand(threadEnvironment.setRuntimeMode, {
+    label: "set thread runtime mode",
+    reportFailure: false,
+  });
+  const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
+    label: "set thread interaction mode",
+    reportFailure: false,
+  });
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     label: "load earlier thread history",
     reportFailure: false,
@@ -715,6 +723,32 @@ function ThreadRouteContent(
     };
     // The server holds the queue behind a stopped or usage-limited run until that run is continued.
     if (composer.resumableRunId !== null) {
+      const runtimeMode = composer.runtimeMode ?? selectedThread.runtimeMode;
+      const interactionMode = composer.interactionMode ?? selectedThread.interactionMode;
+      const createdAt = new Date().toISOString();
+      // A turn on an existing thread runs with the thread's saved modes, not the turn's.
+      if (
+        runtimeMode !== selectedThread.runtimeMode &&
+        failed(
+          await setThreadRuntimeMode({
+            environmentId: selectedThread.environmentId,
+            input: { threadId: selectedThread.id, runtimeMode, createdAt },
+          }),
+        )
+      ) {
+        return;
+      }
+      if (
+        interactionMode !== selectedThread.interactionMode &&
+        failed(
+          await setThreadInteractionMode({
+            environmentId: selectedThread.environmentId,
+            input: { threadId: selectedThread.id, interactionMode, createdAt },
+          }),
+        )
+      ) {
+        return;
+      }
       const continued = await continueThreadRun({
         environmentId: selectedThread.environmentId,
         input: {
@@ -728,8 +762,8 @@ function ThreadRouteContent(
             text: "Continue where you left off.",
             attachments: [],
           },
-          runtimeMode: composer.runtimeMode ?? selectedThread.runtimeMode,
-          interactionMode: composer.interactionMode ?? selectedThread.interactionMode,
+          runtimeMode,
+          interactionMode,
           dispatchMode: "start",
         },
       });
