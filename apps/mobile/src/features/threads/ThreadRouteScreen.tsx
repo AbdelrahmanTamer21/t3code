@@ -58,7 +58,6 @@ import { uuidv4 } from "../../lib/uuid";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-  type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
@@ -107,6 +106,7 @@ import {
   threadRouteOpensDraft,
 } from "./thread-route-hydration";
 import { ThreadHeader } from "./ThreadHeader";
+import { resumeThread } from "./resume-thread";
 import {
   useAndroidWorkspaceBack,
   useWorkspaceBackNavigation,
@@ -710,71 +710,27 @@ function ThreadRouteContent(
 
   const handleResumeQueue = async () => {
     if (!selectedThread) return;
-    const failed = (result: AtomCommandResult<unknown, unknown>) => {
-      if (result._tag !== "Failure") return false;
-      if (!isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        Dialog.alert(
-          "Could not resume thread",
-          error instanceof Error ? error.message : "Try again.",
-        );
-      }
-      return true;
-    };
-    // The server holds the queue behind a stopped or usage-limited run until that run is continued.
-    if (composer.resumableRunId !== null) {
-      const runtimeMode = composer.runtimeMode ?? selectedThread.runtimeMode;
-      const interactionMode = composer.interactionMode ?? selectedThread.interactionMode;
-      const createdAt = new Date().toISOString();
-      // A turn on an existing thread runs with the thread's saved modes, not the turn's.
-      if (
-        runtimeMode !== selectedThread.runtimeMode &&
-        failed(
-          await setThreadRuntimeMode({
-            environmentId: selectedThread.environmentId,
-            input: { threadId: selectedThread.id, runtimeMode, createdAt },
-          }),
-        )
-      ) {
-        return;
-      }
-      if (
-        interactionMode !== selectedThread.interactionMode &&
-        failed(
-          await setThreadInteractionMode({
-            environmentId: selectedThread.environmentId,
-            input: { threadId: selectedThread.id, interactionMode, createdAt },
-          }),
-        )
-      ) {
-        return;
-      }
-      const continued = await continueThreadRun({
-        environmentId: selectedThread.environmentId,
-        input: {
-          creationSource: "mobile",
-          threadId: selectedThread.id,
-          manualContinuationOfRunId: composer.resumableRunId,
-          ...(composer.modelSelection ? { modelSelection: composer.modelSelection } : {}),
-          message: {
-            messageId: MessageId.make(uuidv4()),
-            role: "user",
-            text: "Continue where you left off.",
-            attachments: [],
-          },
-          runtimeMode,
-          interactionMode,
-          dispatchMode: "start",
-        },
-      });
-      if (failed(continued) || !composer.queueHeld) return;
+    const result = await resumeThread({
+      thread: selectedThread,
+      resumableRunId: composer.resumableRunId,
+      queueHeld: composer.queueHeld,
+      runtimeMode: composer.runtimeMode ?? selectedThread.runtimeMode,
+      interactionMode: composer.interactionMode ?? selectedThread.interactionMode,
+      modelSelection: composer.modelSelection,
+      messageId: MessageId.make(uuidv4()),
+      createdAt: new Date().toISOString(),
+      setRuntimeMode: setThreadRuntimeMode,
+      setInteractionMode: setThreadInteractionMode,
+      startTurn: continueThreadRun,
+      resumeQueue: resumeThreadQueue,
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      Dialog.alert(
+        "Could not resume thread",
+        error instanceof Error ? error.message : "Try again.",
+      );
     }
-    failed(
-      await resumeThreadQueue({
-        environmentId: selectedThread.environmentId,
-        input: { threadId: selectedThread.id },
-      }),
-    );
   };
 
   const handleOpenTerminal = (nextTerminalId?: string | null) => {
